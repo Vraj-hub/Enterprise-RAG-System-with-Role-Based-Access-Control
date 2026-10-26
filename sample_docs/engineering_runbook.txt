@@ -1,0 +1,7 @@
+Engineering Runbook (Internal)
+
+Production deployments happen every Tuesday and Thursday at 2:00 PM IST. All deployments require two approved code reviews and a green CI pipeline.
+
+If the API latency alert fires, the on-call engineer must check the database connection pool first, then restart the worker service. Incident severity 1 requires a post-mortem within 48 hours.
+
+The staging database is refreshed from anonymised production data every Sunday night.
