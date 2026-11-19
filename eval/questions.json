@@ -1,0 +1,9 @@
+[
+  {"q": "company handbook policy", "user": "eng_emp", "expect_doc": "company_handbook.txt"},
+  {"q": "engineering runbook", "user": "eng_emp", "expect_doc": "engineering_runbook.txt"},
+  {"q": "salary bands", "user": "hr_mgr", "expect_doc": "hr_salary_bands.txt"},
+  {"q": "salary bands", "user": "eng_emp", "forbidden_doc": "hr_salary_bands.txt"},
+  {"q": "acquisition plan", "user": "hr_mgr", "forbidden_doc": "acquisition_plan.txt"},
+  {"q": "acquisition plan", "user": "admin", "expect_doc": "acquisition_plan.txt"},
+  {"q": "zxqv blorptastic flurble", "user": "admin", "expect_none": true}
+]

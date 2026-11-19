@@ -6,6 +6,9 @@ from pathlib import Path
 # Must be set BEFORE the app is imported
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="rag_test_")
 os.environ["EMBEDDER"] = "hash"
+os.environ["SIGNUP_MODE"] = "open"          # tests/test_signup.py exercises self-service sign-up
+os.environ["SIGNUP_RATE_PER_HOUR"] = "1000"
+os.environ["MIN_RELEVANCE"] = "0.2"
 os.environ["OLLAMA_URL"] = "http://127.0.0.1:9"  # unreachable on purpose -> extractive fallback
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

@@ -9,7 +9,7 @@ from pypdf import PdfReader
 
 from . import vectorstore
 from .config import ALLOWED_EXTENSIONS, CHUNK_OVERLAP, CHUNK_SIZE, UPLOAD_DIR
-from .db import db, row_to_doc
+from .db import db, fts_add, fts_delete, row_to_doc
 
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -36,18 +36,19 @@ def safe_filename(name: str) -> str:
     return base[:120] or "document"
 
 
-def extract_text(filename: str, data: bytes) -> str:
+def extract_pages(filename: str, data: bytes) -> list[tuple[int, str]]:
+    """Return [(page_number, text)]. Page 0 means 'no page concept' (txt/md/docx)."""
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise IngestError(f"File type '{ext}' is not allowed. Use: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
     try:
         if ext == ".pdf":
             reader = PdfReader(io.BytesIO(data))
-            return "\n".join((p.extract_text() or "") for p in reader.pages)
+            return [(i + 1, p.extract_text() or "") for i, p in enumerate(reader.pages)]
         if ext == ".docx":
             doc = DocxDocument(io.BytesIO(data))
-            return "\n".join(p.text for p in doc.paragraphs)
-        return data.decode("utf-8", errors="ignore")
+            return [(0, "\n".join(p.text for p in doc.paragraphs))]
+        return [(0, data.decode("utf-8", errors="ignore"))]
     except Exception as exc:  # corrupt files
         raise IngestError(f"Could not read the file: {exc}") from exc
 
@@ -56,8 +57,7 @@ def ingest_document(
     *, filename: str, data: bytes, owner: dict, department: str, sensitivity: str, allowed_roles: list[str]
 ) -> dict:
     filename = safe_filename(filename)
-    text = extract_text(filename, data)
-    chunks = split_text(text)
+    chunks = [(c, page) for page, text in extract_pages(filename, data) for c in split_text(text)]
     if not chunks:
         raise IngestError("The file has no readable text.")
 
@@ -76,10 +76,12 @@ def ingest_document(
     stored_path.write_bytes(data)
     try:
         count = vectorstore.add_chunks(doc, chunks)
+        fts_add(doc_id, chunks)
     except Exception:
         # Keep database, vector index, and uploaded files consistent on failed indexing.
         try:
             vectorstore.delete_document(doc_id)
+            fts_delete(doc_id)
         except Exception:
             pass
         with db() as conn:

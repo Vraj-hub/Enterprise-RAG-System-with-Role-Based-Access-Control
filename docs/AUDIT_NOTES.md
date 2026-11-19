@@ -4,7 +4,7 @@ This build was reviewed from the uploaded project ZIP.
 
 ## Changes applied
 - Config now loads `.env` and resolves relative `DATA_DIR` from the project root.
-- Default setup uses Ollama embeddings (`nomic-embed-text:latest`) and answer generation (`qwen2.5:7b`).
+- Default setup uses Ollama embeddings (`nomic-embed-text:latest`) and answer generation (`qwen3:8b`).
 - Updated `.env.example`, README, and `.gitignore` to match the Ollama setup.
 - LLM system instructions are passed using Ollama's separate `system` field.
 - If Ollama generation fails, the app returns an explicit unavailable message rather than pretending the top passage is a generated answer.

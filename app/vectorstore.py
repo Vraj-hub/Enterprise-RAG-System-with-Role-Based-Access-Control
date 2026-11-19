@@ -8,7 +8,7 @@ _client = chromadb.PersistentClient(path=CHROMA_PATH)
 _collection = _client.get_or_create_collection("enterprise_docs", metadata={"hnsw:space": "cosine"})
 
 
-def add_chunks(doc: dict, chunks: list[str]) -> int:
+def add_chunks(doc: dict, chunks: list[tuple[str, int]]) -> int:
     """Each chunk carries the full access metadata. Chroma metadata must be scalar,
     so allowed_roles is stored as one boolean flag per role."""
     if not chunks:
@@ -24,9 +24,9 @@ def add_chunks(doc: dict, chunks: list[str]) -> int:
     }
     _collection.add(
         ids=[f"{doc['id']}-{i}" for i in range(len(chunks))],
-        documents=chunks,
-        embeddings=get_embedder().embed(chunks),
-        metadatas=[{**meta_base, "chunk_index": i} for i in range(len(chunks))],
+        documents=[c[0] for c in chunks],
+        embeddings=get_embedder().embed([c[0] for c in chunks]),
+        metadatas=[{**meta_base, "chunk_index": i, "page": c[1]} for i, c in enumerate(chunks)],
     )
     return len(chunks)
 
@@ -72,6 +72,8 @@ def _unpack(res) -> list[dict]:
             {
                 "text": text,
                 "doc_id": meta["doc_id"],
+                "chunk_index": meta.get("chunk_index", 0),
+                "page": meta.get("page", 0),
                 "filename": meta["filename"],
                 "sensitivity": meta["sensitivity"],
                 "department": meta["department"],

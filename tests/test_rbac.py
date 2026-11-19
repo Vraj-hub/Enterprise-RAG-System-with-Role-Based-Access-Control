@@ -59,7 +59,7 @@ def test_no_token_rejected(client):
 
 
 def test_forged_token_rejected(client):
-    forged = jwt.encode({"sub": "1", "exp": 9999999999}, "wrong-secret", algorithm=JWT_ALGORITHM)
+    forged = jwt.encode({"sub": "1", "exp": 9999999999}, "wrong-secret-wrong-secret-wrong-secret-0123456789", algorithm=JWT_ALGORITHM)
     r = client.get("/api/me", headers={"Authorization": f"Bearer {forged}"})
     assert r.status_code == 401
 
@@ -104,6 +104,22 @@ def test_manager_upload_then_employee_can_query_it(client, tokens):
     assert "vpn_guide.txt" in sources(res)
     res = ask(client, tokens["hr_emp"], "What port does the VPN secure tunnel use?")
     assert "vpn_guide.txt" not in sources(res)
+
+
+def test_embedding_failure_returns_service_unavailable(client, tokens, monkeypatch):
+    from app import vectorstore
+
+    def fail_indexing(*args, **kwargs):
+        raise RuntimeError("Ollama embeddings failed")
+
+    monkeypatch.setattr(vectorstore, "add_chunks", fail_indexing)
+    r = client.post(
+        "/api/documents", headers=tokens["eng_mgr"],
+        files={"file": ("embedding_failure.txt", b"Valid document content for indexing.")},
+        data={"department": "engineering", "sensitivity": "internal"},
+    )
+    assert r.status_code == 503
+    assert "Ollama embeddings failed" in r.json()["detail"]
 
 
 def test_bad_extension_rejected(client, tokens):

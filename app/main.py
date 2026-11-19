@@ -9,12 +9,31 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import audit, ingest, rag, rbac, vectorstore
+from .db import fts_delete
+from .routes_extra import router as extra_router
+from .auth_routes import router as auth_router
 from .config import MAX_UPLOAD_BYTES
 from .db import db, init_db, row_to_doc
 from .security import create_token, get_current_user, hash_password, require_roles, verify_password
 
 app = FastAPI(title="Enterprise RAG with RBAC")
 init_db()
+app.include_router(extra_router)
+app.include_router(auth_router)
+
+_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    if not request.url.path.startswith(("/docs", "/redoc", "/openapi")):
+        resp.headers["Content-Security-Policy"] = _CSP
+    return resp
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -37,6 +56,7 @@ class LoginIn(BaseModel):
 
 class QueryIn(BaseModel):
     question: str = Field(min_length=3, max_length=1000)
+    conversation_id: int | None = None
 
 
 class UserCreate(BaseModel):
@@ -64,7 +84,8 @@ def login(body: LoginIn):
         audit.log(action="login_failed", decision="denied", username=body.username, detail="throttled")
         raise HTTPException(429, "Too many failed attempts. Try again in a few minutes.")
     with db() as conn:
-        row = conn.execute("SELECT * FROM users WHERE username=?", (body.username,)).fetchone()
+        # usernames cannot contain "@" (enforced at creation), so a username and an email never collide
+        row = conn.execute("SELECT * FROM users WHERE username=? OR lower(email)=lower(?)", (body.username, body.username)).fetchone()
     if row is None or not row["is_active"] or not verify_password(body.password, row["password_hash"]):
         _failures[body.username].append(time.time())
         audit.log(action="login_failed", decision="denied", username=body.username)
@@ -86,7 +107,7 @@ def me(user: dict = Depends(get_current_user)):
 # ------------------------------------------------------------------ query
 @app.post("/api/query")
 def query(body: QueryIn, user: dict = Depends(get_current_user)):
-    return rag.answer_query(body.question.strip(), user)
+    return rag.answer_query(body.question.strip(), user, body.conversation_id)
 
 
 # ------------------------------------------------------------------ documents
@@ -126,6 +147,8 @@ async def upload_document(
         )
     except ingest.IngestError as exc:
         raise HTTPException(400, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(503, f"Document indexing is unavailable: {exc}") from exc
     audit.log(action="upload", decision="allowed", user=user, sources=[{"doc_id": doc["id"], "filename": doc["filename"]}])
     return doc
 
@@ -138,6 +161,7 @@ def delete_document(doc_id: int, user: dict = Depends(require_roles("admin"))):
             raise HTTPException(404, "Document not found")
         conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
     vectorstore.delete_document(doc_id)
+    fts_delete(doc_id)
     audit.log(action="delete", decision="allowed", user=user, sources=[{"doc_id": doc_id, "filename": row["filename"]}])
     return {"deleted": doc_id}
 
@@ -146,7 +170,7 @@ def delete_document(doc_id: int, user: dict = Depends(require_roles("admin"))):
 @app.get("/api/admin/users")
 def admin_list_users(user: dict = Depends(require_roles("admin"))):
     with db() as conn:
-        rows = conn.execute("SELECT id, username, role, department, is_active, created_at FROM users ORDER BY id").fetchall()
+        rows = conn.execute("SELECT id, username, email, role, department, is_active, created_at FROM users ORDER BY id").fetchall()
     return [dict(r) for r in rows]
 
 
